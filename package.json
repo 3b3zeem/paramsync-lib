@@ -34,7 +34,7 @@
     "type": "git",
     "url": "git+https://github.com/3b3zeem/paramsync.git"
   },
-  "homepage": "https://github.com/3b3zeem/paramsync#readme",
+  "homepage": "https://paramsync.vercel.app",
   "bugs": {
     "url": "https://github.com/3b3zeem/paramsync/issues"
   },
@@ -89,3 +89,4 @@
     "vitest": "^5.0.5"
   }
 }
+

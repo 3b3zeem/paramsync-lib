@@ -7,6 +7,9 @@
 [![Dual ESM/CJS](https://img.shields.io/badge/Module-Dual%20ESM%2FCJS-orange.svg)](#)
 [![Next.js 13/14/15/16](https://img.shields.io/badge/Next.js-App%20Router-black.svg)](https://nextjs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Docs & Demo](https://img.shields.io/badge/Docs%20%26%20Demo-paramsync.vercel.app-7c3aed.svg)](https://paramsync.vercel.app)
+
+🌐 **Live Demo & Interactive Documentation:** [https://paramsync.vercel.app](https://paramsync.vercel.app)
 
 ---
 
