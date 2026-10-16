@@ -1,0 +1,10 @@
+scripts/
+tests/
+playground/
+docs/
+README.github.temp.md
+README.npm.md
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+*.tgz

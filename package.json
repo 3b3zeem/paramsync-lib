@@ -1,6 +1,6 @@
 {
   "name": "paramsync",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Zero-overhead, type-safe URL Search Params state manager for React & Next.js App Router applications.",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -26,8 +26,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "playground": "next dev playground -p 3000",
-    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build",
+    "prepack": "node scripts/prepare-npm-readme.js",
+    "postpack": "node scripts/restore-github-readme.js"
   },
   "repository": {
     "type": "git",
