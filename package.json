@@ -32,11 +32,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/3b3zeem/paramsync.git"
+    "url": "git+https://github.com/3b3zeem/paramsync-lib.git"
   },
   "homepage": "https://paramsync.vercel.app",
   "bugs": {
-    "url": "https://github.com/3b3zeem/paramsync/issues"
+    "url": "https://github.com/3b3zeem/paramsync-lib/issues"
   },
   "keywords": [
     "react",
@@ -89,4 +89,3 @@
     "vitest": "^5.0.5"
   }
 }
-
