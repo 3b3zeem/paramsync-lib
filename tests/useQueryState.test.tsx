@@ -67,13 +67,9 @@ describe('src/useQueryState.ts', () => {
       setValue('iphone');
     });
 
-    // Local state updates instantaneously
     expect(result.current[0]).toBe('iphone');
-
-    // URL has not been updated yet due to debounce
     expect(mockReplace).not.toHaveBeenCalled();
 
-    // Fast-forward timers
     act(() => {
       vi.advanceTimersByTime(300);
     });
@@ -103,14 +99,12 @@ describe('src/useQueryState.ts', () => {
       setValue('abc');
     });
 
-    // Still not fired
     expect(mockReplace).not.toHaveBeenCalled();
 
     act(() => {
       vi.advanceTimersByTime(250);
     });
 
-    // Only called once with final value
     expect(mockReplace).toHaveBeenCalledTimes(1);
     expect(mockReplace).toHaveBeenCalledWith('/products?q=abc', { scroll: false });
   });
@@ -124,7 +118,7 @@ describe('src/useQueryState.ts', () => {
 
     act(() => {
       const [, setValue] = result.current;
-      setValue(''); // Empty string should clean key from URL
+      setValue('');
     });
 
     expect(mockReplace).toHaveBeenCalledWith('/products?page=3', { scroll: false });
@@ -139,7 +133,7 @@ describe('src/useQueryState.ts', () => {
 
     act(() => {
       const [, setValue] = result.current;
-      setValue([]); // Empty array should clean key
+      setValue([]);
     });
 
     expect(mockReplace).toHaveBeenCalledWith('/products', { scroll: false });
@@ -191,7 +185,6 @@ describe('src/useQueryState.ts', () => {
     });
 
     expect(result.current[0]).toEqual({ min: 0, max: 1000 });
-    // Clean URL: price key is removed because it equals default
     expect(mockReplace).toHaveBeenCalledWith('/products?other=stay', { scroll: false });
   });
 });

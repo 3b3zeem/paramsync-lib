@@ -162,7 +162,6 @@ describe('src/parsers.ts', () => {
     it('serializes range correctly and omits when matching defaults', () => {
       const priceParser = parseAsNumberRange(0, 1000);
       expect(priceParser.serialize({ min: 50, max: 300 })).toBe('50-300');
-      // When matching defaults, serialize returns '' for Clean URL
       expect(priceParser.serialize({ min: 0, max: 1000 })).toBe('');
     });
 
@@ -218,7 +217,6 @@ describe('src/parsers.ts', () => {
       expect(isCleanValue('active')).toBe(false);
       expect(isCleanValue(['shoes'])).toBe(false);
 
-      // Default value matches
       expect(isCleanValue(1, 1)).toBe(true);
       expect(isCleanValue(2, 1)).toBe(false);
       expect(isCleanValue({ min: 0, max: 100 }, { min: 0, max: 100 })).toBe(true);

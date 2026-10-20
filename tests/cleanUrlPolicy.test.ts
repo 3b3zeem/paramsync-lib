@@ -15,7 +15,7 @@ describe('Clean URL Policy Edge Cases', () => {
 
   it('identifies empty string as clean value', () => {
     expect(isCleanValue('')).toBe(true);
-    expect(isCleanValue('   ')).toBe(false); // Non-empty string
+    expect(isCleanValue('   ')).toBe(false);
   });
 
   it('identifies empty arrays as clean values', () => {
@@ -24,14 +24,12 @@ describe('Clean URL Policy Edge Cases', () => {
   });
 
   it('distinguishes between 0 and falsy clean values', () => {
-    // 0 is a valid number, not clean by default unless defaultValue is 0
     expect(isCleanValue(0)).toBe(false);
     expect(isCleanValue(0, 0)).toBe(true);
     expect(isCleanValue(0, 1)).toBe(false);
   });
 
   it('distinguishes between false and clean values', () => {
-    // false is a valid boolean
     expect(isCleanValue(false)).toBe(false);
     expect(isCleanValue(false, false)).toBe(true);
     expect(isCleanValue(false, true)).toBe(false);

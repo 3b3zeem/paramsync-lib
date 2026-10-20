@@ -18,6 +18,9 @@ export interface BatchNavigationOptions {
   scroll?: boolean;
 }
 
+/**
+ * Parameter descriptor for batch updates requiring explicit parser serialization or custom defaults.
+ */
 export interface BatchParamDescriptor<T = any> {
   value: T;
   parser?: Parser<any>;
@@ -40,6 +43,23 @@ export interface UseBatchQueryParamsOptions extends BatchNavigationOptions {}
 /**
  * Hook to execute batch updates to URL query parameters in a single transition.
  * Ideal for "Apply Filters" buttons, filter drawers/modals, and wiping multiple parameters at once.
+ *
+ * @param options Default navigation options for this hook instance.
+ *
+ * @example
+ * ```tsx
+ * const { setBatchParams, resetAllParams, isPending } = useBatchQueryParams();
+ *
+ * // Batch update filters simultaneously in one transition
+ * setBatchParams({
+ *   category: 'shoes',
+ *   page: 1,
+ *   price: { value: { min: 20, max: 100 }, parser: parseAsNumberRange(0, 1000) },
+ * });
+ *
+ * // Clear filters while preserving tab and tracking parameters
+ * resetAllParams(['tab', 'utm_source']);
+ * ```
  */
 export function useBatchQueryParams(options?: UseBatchQueryParamsOptions) {
   const router = useRouter();
@@ -67,7 +87,6 @@ export function useBatchQueryParams(options?: UseBatchQueryParamsOptions) {
         let parser: Parser<unknown> | undefined;
         let defaultValue: unknown = undefined;
 
-        // Check if passed entry is a descriptor with parser/defaultValue
         if (
           rawEntry !== null &&
           typeof rawEntry === 'object' &&
@@ -80,7 +99,6 @@ export function useBatchQueryParams(options?: UseBatchQueryParamsOptions) {
           defaultValue = descriptor.defaultValue ?? parser?.defaultValue;
         }
 
-        // Apply Clean URL Policy
         if (isCleanValue(value, defaultValue)) {
           currentParams.delete(key);
         } else if (parser) {

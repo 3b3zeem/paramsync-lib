@@ -32,6 +32,14 @@ export interface ParserWithDefault<T> extends Parser<T> {
 
 /**
  * Factory to create custom parsers with seamless chaining and default value fallback.
+ *
+ * @example
+ * ```ts
+ * const parseAsDate = createParser({
+ *   parse: (val) => (val ? new Date(val) : null),
+ *   serialize: (date) => (date ? date.toISOString().slice(0, 10) : ''),
+ * });
+ * ```
  */
 export function createParser<T>(options: {
   parse: (value: string | null) => T;
@@ -74,13 +82,16 @@ export function createParser<T>(options: {
   return parser;
 }
 
-/* ========================================================================== */
-/*                             Primitive Parsers                              */
-/* ========================================================================== */
+// --- Primitive Parsers ---
 
 /**
  * Parser for string parameters.
  * Parses raw string or returns `null` when missing.
+ *
+ * @example
+ * ```ts
+ * const [query, setQuery] = useQueryState('q', parseAsString.withDefault(''));
+ * ```
  */
 export const parseAsString: Parser<string | null> = createParser<string | null>({
   parse: (value) => value,
@@ -90,6 +101,11 @@ export const parseAsString: Parser<string | null> = createParser<string | null>(
 /**
  * Parser for integer numbers.
  * Validates strict integer representations (e.g. `42`, `-5`). Returns `null` on NaN or invalid strings.
+ *
+ * @example
+ * ```ts
+ * const [page, setPage] = useQueryState('page', parseAsInteger.withDefault(1));
+ * ```
  */
 export const parseAsInteger: Parser<number | null> = createParser<number | null>({
   parse: (value) => {
@@ -116,6 +132,11 @@ export const parseAsFloat: Parser<number | null> = createParser<number | null>({
 /**
  * Parser for boolean parameters.
  * Treats 'true' and '1' as `true`, 'false' and '0' as `false`. Returns `null` on unrecognized values.
+ *
+ * @example
+ * ```ts
+ * const [isOpen, setIsOpen] = useQueryState('open', parseAsBoolean.withDefault(false));
+ * ```
  */
 export const parseAsBoolean: Parser<boolean | null> = createParser<boolean | null>({
   parse: (value) => {
@@ -128,9 +149,7 @@ export const parseAsBoolean: Parser<boolean | null> = createParser<boolean | nul
   serialize: (value) => (value === true ? 'true' : value === false ? 'false' : ''),
 });
 
-/* ========================================================================== */
-/*                             Complex Parsers                                */
-/* ========================================================================== */
+// --- Complex Parsers ---
 
 /**
  * Parser for arrays of values (e.g. `?tags=shoes,watches`).
@@ -138,6 +157,11 @@ export const parseAsBoolean: Parser<boolean | null> = createParser<boolean | nul
  *
  * @param itemParser Parser instance for individual items
  * @param separator Custom delimiter (defaults to comma `,`)
+ *
+ * @example
+ * ```ts
+ * const [tags, setTags] = useQueryState('tags', parseAsArray(parseAsString));
+ * ```
  */
 export function parseAsArray<T>(
   itemParser: Parser<T>,
@@ -182,6 +206,11 @@ export interface NumberRange {
  * @param defaultMin Minimum range bound
  * @param defaultMax Maximum range bound
  * @param separator Delimiter between min and max (defaults to `-`)
+ *
+ * @example
+ * ```ts
+ * const [price, setPrice] = useQueryState('price', parseAsNumberRange(0, 1000));
+ * ```
  */
 export function parseAsNumberRange(
   defaultMin: number,
@@ -238,6 +267,11 @@ export interface SortOption<TField extends string = string> {
  * @param defaultField Initial sort field
  * @param defaultOrder Initial sort order (`'asc'` or `'desc'`)
  * @param separator Delimiter between field and order (defaults to `.`)
+ *
+ * @example
+ * ```ts
+ * const [sort, setSort] = useQueryState('sort', parseAsSort('createdAt', 'desc'));
+ * ```
  */
 export function parseAsSort<TField extends string = string>(
   defaultField: TField,
@@ -281,9 +315,7 @@ export function parseAsSort<TField extends string = string>(
   }) as ParserWithDefault<SortOption<TField>>;
 }
 
-/* ========================================================================== */
-/*                             Clean URL Helpers                              */
-/* ========================================================================== */
+// --- Clean URL Helpers ---
 
 /**
  * Deep equality comparator for state values against defaults.

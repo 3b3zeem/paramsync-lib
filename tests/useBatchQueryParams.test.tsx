@@ -39,7 +39,7 @@ describe('src/useBatchQueryParams.ts', () => {
       result.current.setBatchParams({
         search: 'boots',
         category: 'shoes',
-        page: 1, // Will set page=1
+        page: 1,
       });
     });
 
@@ -57,25 +57,20 @@ describe('src/useBatchQueryParams.ts', () => {
 
     act(() => {
       result.current.setBatchParams({
-        // Array parser: non-empty adds comma list
         tags: {
           value: ['sale', 'winter'],
           parser: parseAsArray(parseAsString),
         },
-        // Range parser: matches default (0-1000) so it must be cleaned from URL
         price: {
           value: { min: 0, max: 1000 },
           parser: parseAsNumberRange(0, 1000),
         },
-        // Clean empty string
         search: '',
-        // Delete color by passing null
         color: null,
       });
     });
 
     expect(mockReplace).toHaveBeenCalledTimes(1);
-    // 'old=keep' remains, 'tags' is serialized, 'price', 'search', and 'color' are cleaned!
     expect(mockReplace).toHaveBeenCalledWith(
       '/catalog?old=keep&tags=sale%2Cwinter',
       { scroll: false }
