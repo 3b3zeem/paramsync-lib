@@ -1,5 +1,6 @@
 /**
- * paramsync - Zero-overhead, type-safe URL search params state manager for React & Next.js App Router.
+ * paramsync - Zero-overhead, type-safe URL search params state manager for React.
+ * Router-agnostic with built-in Vanilla browser support and specialized Next.js App Router entrypoint.
  */
 
 // Parsers & Serializers Layer
@@ -14,26 +15,50 @@ export {
   parseAsInteger,
   parseAsFloat,
   parseAsBoolean,
+  parseAsStringLiteral,
+  parseAsIsoDate,
+  parseAsJson,
   parseAsArray,
   parseAsNumberRange,
   parseAsSort,
+  safeDecode,
+  safeEncode,
   areValuesEqual,
   isCleanValue,
 } from './parsers';
 
-// Single Hook Layer
+// Types & Adapter Interface
 export {
+  type NavigationOptions,
+  type RouterAdapter,
   type UseQueryStateOptions,
   type StateUpdater,
-  useQueryState,
-} from './useQueryState';
-
-// Batch & Multi-Filter Layer
-export {
   type BatchNavigationOptions,
   type BatchParamDescriptor,
   type BatchParamValue,
   type BatchParamsRecord,
   type UseBatchQueryParamsOptions,
-  useBatchQueryParams,
-} from './useBatchQueryParams';
+} from './types';
+
+// Adapters Layer
+export {
+  vanillaAdapter,
+  notifyUrlChange,
+} from './adapters/vanilla';
+
+// URL Manager Layer
+export {
+  getCommittedSearchParams,
+  syncCommittedSearchParams,
+  commitUrlParam,
+  commitImmediateBatch,
+  commitImmediateReset,
+  batchUpdates,
+  registerHook,
+  notifyActiveHooksReset,
+  notifyActiveHooksBatchUpdate,
+} from './urlManager';
+
+// Core Hooks (Router-Agnostic, default to Vanilla browser adapter)
+export { useQueryState } from './useQueryState';
+export { useBatchQueryParams } from './useBatchQueryParams';

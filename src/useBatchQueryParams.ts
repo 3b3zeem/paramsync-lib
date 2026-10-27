@@ -1,73 +1,54 @@
-'use client';
+"use client";
 
-import { useCallback, useTransition } from 'react';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { Parser, isCleanValue } from './parsers';
-
-export interface BatchNavigationOptions {
-  /**
-   * Navigation method: 'replace' updates in-place; 'push' creates a new browser history entry.
-   * @default 'replace'
-   */
-  history?: 'replace' | 'push';
-
-  /**
-   * Whether to scroll to top of page on update.
-   * @default false
-   */
-  scroll?: boolean;
-}
-
-/**
- * Parameter descriptor for batch updates requiring explicit parser serialization or custom defaults.
- */
-export interface BatchParamDescriptor<T = any> {
-  value: T;
-  parser?: Parser<any>;
-  defaultValue?: T;
-}
-
-export type BatchParamValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | unknown[]
-  | BatchParamDescriptor<any>;
-
-export type BatchParamsRecord = Record<string, BatchParamValue>;
-
-export interface UseBatchQueryParamsOptions extends BatchNavigationOptions {}
+import { useCallback, useTransition } from "react";
+import { Parser, isCleanValue } from "./parsers";
+import {
+  UseBatchQueryParamsOptions,
+  BatchNavigationOptions,
+  BatchParamsRecord,
+  BatchParamDescriptor,
+  RouterAdapter,
+} from "./types";
+import { vanillaAdapter } from "./adapters/vanilla";
+import {
+  commitImmediateBatch,
+  commitImmediateReset,
+  notifyActiveHooksReset,
+  notifyActiveHooksBatchUpdate,
+} from "./urlManager";
 
 /**
- * Hook to execute batch updates to URL query parameters in a single transition.
+ * Router-agnostic hook to execute batch updates or resets of URL query parameters in a single transition.
  * Ideal for "Apply Filters" buttons, filter drawers/modals, and wiping multiple parameters at once.
  *
- * @param options Default navigation options for this hook instance.
+ * Features:
+ * - **Single Transition Navigation**: Commits multiple parameters simultaneously.
+ * - **Instantaneous Multi-Reset**: Instantly resets the internal state of all active `useQueryState` hooks.
+ * - **Router Agnostic**: Runs in any React environment (Vite, React Router, Remix, TanStack Router, Next.js).
+ *
+ * @param options Default navigation options and optional custom router adapter.
  *
  * @example
  * ```tsx
  * const { setBatchParams, resetAllParams, isPending } = useBatchQueryParams();
  *
- * // Batch update filters simultaneously in one transition
+ * // Batch update filters simultaneously
  * setBatchParams({
  *   category: 'shoes',
  *   page: 1,
  *   price: { value: { min: 20, max: 100 }, parser: parseAsNumberRange(0, 1000) },
  * });
  *
- * // Clear filters while preserving tab and tracking parameters
+ * // Clear all filters while preserving tab and tracking parameters;
+ * // also instantly resets local useQueryState hooks on the page!
  * resetAllParams(['tab', 'utm_source']);
  * ```
  */
 export function useBatchQueryParams(options?: UseBatchQueryParamsOptions) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const adapter: RouterAdapter = options?.adapter ?? vanillaAdapter;
   const [isPending, startTransition] = useTransition();
 
-  const defaultHistory = options?.history ?? 'replace';
+  const defaultHistory = options?.history ?? "replace";
   const defaultScroll = options?.scroll ?? false;
 
   /**
@@ -78,9 +59,7 @@ export function useBatchQueryParams(options?: UseBatchQueryParamsOptions) {
    */
   const setBatchParams = useCallback(
     (updates: BatchParamsRecord, navOptions?: BatchNavigationOptions) => {
-      const currentParams = new URLSearchParams(
-        searchParams ? searchParams.toString() : ''
-      );
+      const serializedMap: Record<string, string | null> = {};
 
       for (const [key, rawEntry] of Object.entries(updates)) {
         let value: unknown = rawEntry;
@@ -89,8 +68,8 @@ export function useBatchQueryParams(options?: UseBatchQueryParamsOptions) {
 
         if (
           rawEntry !== null &&
-          typeof rawEntry === 'object' &&
-          'value' in rawEntry &&
+          typeof rawEntry === "object" &&
+          "value" in rawEntry &&
           !Array.isArray(rawEntry)
         ) {
           const descriptor = rawEntry as BatchParamDescriptor<unknown>;
@@ -100,75 +79,63 @@ export function useBatchQueryParams(options?: UseBatchQueryParamsOptions) {
         }
 
         if (isCleanValue(value, defaultValue)) {
-          currentParams.delete(key);
+          serializedMap[key] = null;
         } else if (parser) {
           const serialized = parser.serialize(value);
-          if (serialized === '') {
-            currentParams.delete(key);
-          } else {
-            currentParams.set(key, serialized);
-          }
+          serializedMap[key] = serialized === "" ? null : serialized;
         } else if (Array.isArray(value)) {
           if (value.length === 0) {
-            currentParams.delete(key);
+            serializedMap[key] = null;
           } else {
-            currentParams.set(key, value.map(String).join(','));
+            serializedMap[key] = value.map(String).join(",");
           }
         } else {
-          currentParams.set(key, String(value));
+          serializedMap[key] = String(value);
         }
       }
 
-      const queryString = currentParams.toString();
-      const nextUrl = queryString ? `${pathname}?${queryString}` : pathname;
+      // Notify active hooks across the page so local state updates immediately (0ms UI latency)
+      notifyActiveHooksBatchUpdate(updates);
+
       const historyMode = navOptions?.history ?? defaultHistory;
       const shouldScroll = navOptions?.scroll ?? defaultScroll;
 
       startTransition(() => {
-        if (historyMode === 'push') {
-          router.push(nextUrl, { scroll: shouldScroll });
-        } else {
-          router.replace(nextUrl, { scroll: shouldScroll });
-        }
+        commitImmediateBatch(
+          serializedMap,
+          { history: historyMode, scroll: shouldScroll },
+          adapter,
+        );
       });
     },
-    [searchParams, pathname, defaultHistory, defaultScroll, router]
+    [adapter, defaultHistory, defaultScroll],
   );
 
   /**
    * Wipe all non-essential query parameters from the URL in one call.
+   * Automatically clears the internal React state of active `useQueryState` hooks
+   * on the page so the UI syncs instantaneously.
    *
    * @param preserveKeys List of query param keys to keep intact (e.g. `['tab', 'utm_source']`).
    * @param navOptions Optional navigation overrides.
    */
   const resetAllParams = useCallback(
     (preserveKeys: string[] = [], navOptions?: BatchNavigationOptions) => {
-      const currentParams = new URLSearchParams(
-        searchParams ? searchParams.toString() : ''
-      );
-      const preserveSet = new Set(preserveKeys);
+      // Instantly clear the internal state and cancel debounce timers for active hooks
+      notifyActiveHooksReset(preserveKeys);
 
-      const allKeys = Array.from(currentParams.keys());
-      for (const key of allKeys) {
-        if (!preserveSet.has(key)) {
-          currentParams.delete(key);
-        }
-      }
-
-      const queryString = currentParams.toString();
-      const nextUrl = queryString ? `${pathname}?${queryString}` : pathname;
       const historyMode = navOptions?.history ?? defaultHistory;
       const shouldScroll = navOptions?.scroll ?? defaultScroll;
 
       startTransition(() => {
-        if (historyMode === 'push') {
-          router.push(nextUrl, { scroll: shouldScroll });
-        } else {
-          router.replace(nextUrl, { scroll: shouldScroll });
-        }
+        commitImmediateReset(
+          preserveKeys,
+          { history: historyMode, scroll: shouldScroll },
+          adapter,
+        );
       });
     },
-    [searchParams, pathname, defaultHistory, defaultScroll, router]
+    [adapter, defaultHistory, defaultScroll],
   );
 
   return {

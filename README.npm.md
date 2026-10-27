@@ -1,6 +1,6 @@
 # paramsync
 
-Type-safe, zero-overhead URL Search Parameters state manager for React and Next.js App Router applications.
+Type-safe, zero-overhead URL Search Parameters state manager for React (Router-Agnostic, Vite, React Router, Remix, TanStack Router) and Next.js App Router applications.
 
 [![npm version](https://img.shields.io/npm/v/paramsync.svg?style=flat&colorA=18181B&colorB=2563EB)](https://www.npmjs.com/package/paramsync)
 [![npm downloads](https://img.shields.io/npm/dm/paramsync.svg?style=flat&colorA=18181B&colorB=2563EB)](https://www.npmjs.com/package/paramsync)
@@ -11,13 +11,16 @@ Type-safe, zero-overhead URL Search Parameters state manager for React and Next.
 
 ## What is paramsync?
 
-In Next.js App Router applications, managing state through URL search parameters using standard `useSearchParams()` and `router.replace()` often introduces keystroke latency during live search, UI stutter, and cluttered URLs filled with empty or default values.
+Managing state through URL search parameters using standard APIs often introduces keystroke latency during live search, UI stutter, race conditions between debounced and immediate inputs, and cluttered URLs filled with empty or default values.
 
 `paramsync` provides a seamless `[value, setValue]` state hook that binds React state directly to the URL:
 - **0ms Input Latency:** Controlled inputs update local state instantaneously while background URL updates are debounced.
+- **Race Condition & Overwrite Protection:** State updates coordinate to guarantee concurrent and debounced changes never overwrite each other.
+- **Router-Agnostic Core:** Works in **any** React application (Vite, React Router, Remix, Astro, TanStack Router) with built-in Vanilla browser history support and zero external router dependencies.
+- **Dedicated Next.js Entrypoint (`paramsync/next`):** Deep integration with Next.js App Router transitions and Server Components.
+- **Instantaneous Multi-Reset:** `resetAllParams()` immediately resets internal state across all active hooks on the page.
 - **Clean URL Policy:** Default values, empty strings, and empty arrays are automatically purged from the query string.
-- **Batch Transitions:** Multiple filter changes can be committed simultaneously in a single navigation transition via `useBatchQueryParams`.
-- **Server Component Compatible:** Parsers have zero DOM dependencies and execute safely in React Server Components and Route Handlers.
+- **Safe URI Decoding:** Built-in protection against malformed percent encodings (`URIError`) with native Arabic & Unicode support.
 
 ---
 
@@ -33,19 +36,19 @@ yarn add paramsync
 
 ### Peer Dependencies
 - `react` >= 18.0.0
-- `next` >= 13.0.0 (App Router)
+- `next` >= 13.0.0 (Optional — only required when importing from `paramsync/next`)
 
 ---
 
 ## Quick Example
 
-```tsx
-'use client';
+### 1. Plain React / Vite / React Router / Remix / TanStack Router
 
+```tsx
 import { useQueryState, parseAsString, parseAsInteger } from 'paramsync';
 
 export default function SearchFeed() {
-  // Live search with 300ms URL debounce (zero typing lag)
+  // Live search with 300ms URL debounce (0ms local state latency)
   const [search, setSearch] = useQueryState('q', parseAsString.withDefault(''), {
     debounceMs: 300,
   });
@@ -59,19 +62,46 @@ export default function SearchFeed() {
         type="text"
         value={search}
         onChange={(e) => {
-          setPage(1); // Reset page index on search
+          setPage(1);
           setSearch(e.target.value);
         }}
         placeholder="Filter results..."
       />
-
-      <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-        Prev
-      </button>
       <span>Page {page}</span>
-      <button onClick={() => setPage((p) => p + 1)}>
-        Next
-      </button>
+    </div>
+  );
+}
+```
+
+### 2. Next.js App Router
+
+```tsx
+'use client';
+
+// Import from the specialized 'paramsync/next' entrypoint for App Router transitions
+import { useQueryState, parseAsStringLiteral, parseAsIsoDate } from 'paramsync/next';
+
+export default function DashboardFilters() {
+  // Strict TypeScript union type inference without manual type casting
+  const [status, setStatus] = useQueryState(
+    'status',
+    parseAsStringLiteral(['all', 'pending', 'accepted', 'rejected'] as const).withDefault('all')
+  );
+
+  // Calendar date filter (YYYY-MM-DD <-> Date object)
+  const [dateFrom, setDateFrom] = useQueryState(
+    'from',
+    parseAsIsoDate.withDefault(new Date(2026, 0, 1))
+  );
+
+  return (
+    <div>
+      <select value={status} onChange={(e) => setStatus(e.target.value as any)}>
+        <option value="all">All</option>
+        <option value="pending">Pending</option>
+        <option value="accepted">Accepted</option>
+        <option value="rejected">Rejected</option>
+      </select>
     </div>
   );
 }
@@ -86,6 +116,9 @@ export default function SearchFeed() {
 | Parser | Parse Signature | Clean URL Behavior | Example |
 | :--- | :--- | :--- | :--- |
 | `parseAsString` | `string \| null` | Omitted if `""` or default | `?q=laptop` |
+| `parseAsStringLiteral(allowed)` | `T \| null` | Omitted if default or invalid | `?status=pending` |
+| `parseAsIsoDate` | `Date \| null` | Omitted if default | `?date=2026-10-27` |
+| `parseAsJson<T>(validator?)` | `T \| null` | Omitted if default | `?filter=%7B%22min%22%3A10%7D` |
 | `parseAsInteger` | `number \| null` | Omitted if default | `?page=2` |
 | `parseAsFloat` | `number \| null` | Omitted if default | `?rating=4.5` |
 | `parseAsBoolean` | `boolean \| null` | Omitted if default | `?inStock=true` |
@@ -110,7 +143,7 @@ const [value, setValue, reset, isPending] = useQueryState('q', parseAsString.wit
 ```
 
 #### `useBatchQueryParams(options?)`
-Executes multiple parameter changes in a single URL transition (for modals or drawers):
+Executes multiple parameter changes in a single URL transition:
 
 ```tsx
 const { setBatchParams, resetAllParams, isPending } = useBatchQueryParams();
@@ -120,11 +153,24 @@ setBatchParams({
   q: 'shoes',
   categories: { value: ['running'], parser: parseAsArray(parseAsString) },
   price: { value: { min: 50, max: 200 }, parser: parseAsNumberRange(0, 1000) },
-  page: null, // Deletes 'page' from URL (resets to page 1)
+  page: null, // Deletes 'page' from URL
 });
 
-// Wipe all non-essential parameters at once
+// Wipe all non-essential parameters at once (instantly resets UI state)
 resetAllParams(['tab', 'utm_source']);
+```
+
+#### `batchUpdates(fn)`
+Utility to coalesce multiple individual `useQueryState` updates into a single navigation:
+
+```tsx
+import { batchUpdates } from 'paramsync';
+
+batchUpdates(() => {
+  setQuery('');
+  setCategory('all');
+  setPage(1);
+});
 ```
 
 ---
@@ -141,13 +187,11 @@ resetAllParams(['tab', 'utm_source']);
 
 ## Documentation & Repository
 
-For complete architectural guides, Server Components (RSC) data fetching patterns, TanStack Query integration, dynamic facet filtering, and recipes:
-
-- **Repository & Full Docs:** [https://github.com/3b3zeem/paramsync](https://github.com/3b3zeem/paramsync)
-- **Issues & Feedback:** [https://github.com/3b3zeem/paramsync/issues](https://github.com/3b3zeem/paramsync/issues)
+- **Repository & Full Docs:** [https://github.com/3b3zeem/paramsync-lib](https://github.com/3b3zeem/paramsync-lib)
+- **Issues & Feedback:** [https://github.com/3b3zeem/paramsync-lib/issues](https://github.com/3b3zeem/paramsync-lib/issues)
 
 ---
 
 ## License
 
-MIT © [Ahmed Mostafa](https://github.com/3b3zeem/paramsync)
+MIT © [Ahmed Mostafa](https://github.com/3b3zeem/paramsync-lib)

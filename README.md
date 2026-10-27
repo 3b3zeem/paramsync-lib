@@ -1,11 +1,12 @@
 # paramsync
 
-> **Zero-overhead, type-safe URL Search Params state manager for React 18+ and Next.js (>=13.0.0 App Router).**  
+> **Zero-overhead, type-safe URL Search Params state manager for React (Vite, React Router, Remix, TanStack Router) and Next.js (App Router).**  
 > Designed for live search inputs, multi-attribute facet filtering, price/metric range sliders, data table sorting, pagination, and modal filter drawers.
 
+[![npm version](https://img.shields.io/npm/v/paramsync.svg?style=flat&colorA=18181B&colorB=2563EB)](https://www.npmjs.com/package/paramsync)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5+-blue.svg)](https://www.typescriptlang.org/)
 [![Dual ESM/CJS](https://img.shields.io/badge/Module-Dual%20ESM%2FCJS-orange.svg)](#)
-[![Next.js 13/14/15/16](https://img.shields.io/badge/Next.js-App%20Router-black.svg)](https://nextjs.org/)
+[![Router Agnostic](https://img.shields.io/badge/Router-Agnostic%20%2B%20Next.js-purple.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docs & Demo](https://img.shields.io/badge/Docs%20%26%20Demo-paramsync.vercel.app-7c3aed.svg)](https://paramsync.vercel.app)
 
@@ -16,13 +17,18 @@
 ## Table of Contents
 
 1. [Overview & Key Advantages](#1-overview--key-advantages)
-2. [Installation & Requirements](#2-installation--requirements)
+2. [Installation & Entrypoints](#2-installation--entrypoints)
+   - [Router-Agnostic Setup (Vite, React Router, Remix, Astro)](#router-agnostic-setup)
+   - [Next.js App Router Setup (`paramsync/next`)](#nextjs-app-router-setup)
 3. [Quick Reference Cheatsheet](#3-quick-reference-cheatsheet)
 4. [Quick Start Tutorial](#4-quick-start-tutorial)
 5. [In-Depth Parsers Reference](#5-in-depth-parsers-reference)
    - [Parser Core Interfaces](#parser-core-interfaces)
    - [createParser Factory](#createparser-factory)
    - [parseAsString](#parseasstring)
+   - [parseAsStringLiteral](#parseasstringliteral)
+   - [parseAsIsoDate](#parseasisodate)
+   - [parseAsJson](#parseasjson)
    - [parseAsInteger](#parseasinteger)
    - [parseAsFloat](#parseasfloat)
    - [parseAsBoolean](#parseasboolean)
@@ -30,41 +36,27 @@
    - [parseAsNumberRange](#parseasnumberrange)
    - [parseAsSort](#parseassort)
    - [Clean URL Utility Helpers](#clean-url-utility-helpers)
+   - [Safe URL Decoding & Arabic Unicode Support](#safe-url-decoding--arabic-unicode-support)
 6. [In-Depth Hooks Reference](#6-in-depth-hooks-reference)
    - [useQueryState](#usequerystate)
      - [Function Signature & Type Overloads](#function-signature--type-overloads)
      - [Options Reference](#options-reference)
      - [Return Values Reference](#return-values-reference)
      - [Functional State Updates](#functional-state-updates)
-     - [Reset Mechanics](#reset-mechanics)
+     - [Race Condition & Stale searchParams Protection](#race-condition--stale-searchparams-protection)
    - [useBatchQueryParams](#usebatchqueryparams)
      - [Function Signature](#usebatchqueryparams-signature)
      - [BatchParamDescriptor](#batchparamdescriptor)
      - [setBatchParams](#setbatchparams)
-     - [resetAllParams](#resetallparams)
+     - [resetAllParams (Instant UI State Reset)](#resetallparams)
+   - [batchUpdates Utility](#batchupdates-utility)
 7. [Clean URL Policy: Complete Specification](#7-clean-url-policy-complete-specification)
-   - [Decision Matrix Table](#decision-matrix-table)
-   - [Why Clean URLs Matter](#why-clean-urls-matter)
 8. [Architecture & Data Fetching Patterns](#8-architecture--data-fetching-patterns)
-   - [Pattern 1: Server Components (RSC) + Direct API Fetching](#pattern-1-server-components-rsc--direct-api-fetching)
-   - [Pattern 2: Route Handlers & Server Actions](#pattern-2-route-handlers--server-actions)
-   - [Pattern 3: Client-Side with TanStack Query (React Query)](#pattern-3-client-side-with-tanstack-query-react-query)
-   - [Pattern 4: Client-Side with SWR](#pattern-4-client-side-with-swr)
-   - [Pattern 5: Native Fetch with useEffect](#pattern-5-native-fetch-with-useeffect)
 9. [Dynamic Facet Filters from API](#9-dynamic-facet-filters-from-api)
-   - [Dynamic Facet Architecture](#dynamic-facet-architecture)
-   - [Complete Dynamic Facet Component](#complete-dynamic-facet-component)
 10. [Pagination Coordination & Stale Page Prevention](#10-pagination-coordination--stale-page-prevention)
-    - [The Stale Page Problem Explained](#the-stale-page-problem-explained)
-    - [Auto-Reset Solution Patterns](#auto-reset-solution-patterns)
 11. [Complete Production Recipes](#11-complete-production-recipes)
-    - [Recipe 1: Instant Reactive E-Commerce Filter Bar](#recipe-1-instant-reactive-e-commerce-filter-bar)
-    - [Recipe 2: Filter Drawer / Modal with Apply & Reset All](#recipe-2-filter-drawer--modal-with-apply--reset-all)
-    - [Recipe 3: Data Table with Sorting & Dynamic Page Size](#recipe-3-data-table-with-sorting--dynamic-page-size)
 12. [TypeScript System & Type Narrowing](#12-typescript-system--type-narrowing)
 13. [Next.js App Router Best Practices & Gotchas](#13-nextjs-app-router-best-practices--gotchas)
-    - [Suspense Boundary Requirement](#suspense-boundary-requirement)
-    - [Browser History vs In-Place Updates](#browser-history-vs-in-place-updates)
 14. [Testing & Verification](#14-testing--verification)
 15. [License](#15-license)
 
@@ -72,22 +64,23 @@
 
 ## 1. Overview & Key Advantages
 
-Binding UI state to URL query parameters is essential for building modern web applications where search, filters, sorting, and pagination are bookmarkable and shareable. However, standard solutions often cause keystroke latency, excessive URL clutter, race conditions, and heavy boilerplate.
+Binding UI state to URL query parameters is essential for building modern web applications where search, filters, sorting, and pagination are bookmarkable and shareable. However, standard solutions often cause keystroke latency, excessive URL clutter, race conditions between debounced and immediate inputs, and heavy router coupling.
 
 `paramsync` is architected from the ground up to solve these challenges:
 
-- **Zero Typing Lag (Optimistic Local State):** Controlled inputs update an internal React state immediately (`0ms`), ensuring smooth keystroke responsiveness while URL navigation is scheduled in the background.
-- **Built-in Smart Debouncing:** Dedicated `debounceMs` natively delays Next.js router transitions while keeping controlled inputs responsive in real time.
+- **Zero Typing Lag (Optimistic Local State):** Controlled inputs update internal React state immediately (`0ms`), ensuring smooth keystroke responsiveness while URL navigation is debounced or scheduled asynchronously.
+- **Race Condition & Overwrite Protection:** Centralized in-memory URL coordinator guarantees that debounced search commits never wipe out immediate pagination clicks or concurrent parameter changes.
+- **Router-Agnostic Core:** Works in **any** React application (Vite, React Router, Remix, Astro, TanStack Router) with built-in Vanilla browser history support and zero external router dependencies.
+- **Dedicated Next.js App Router Entrypoint (`paramsync/next`):** Deep integration with Next.js router transitions, `useTransition`, and Server Components (RSC).
+- **Instantaneous Multi-Reset (0ms Latency):** Calling `useBatchQueryParams().resetAllParams()` immediately resets internal state across all active `useQueryState` hooks and cancels pending debounce timers without waiting for router transitions.
 - **Clean URL Policy:** Automatically purges query parameters when their values match defaults, are empty strings (`""`), or are empty arrays (`[]`).
-- **Single & Batch Transitions:** Update a single parameter using `useQueryState` or update multiple filters simultaneously in a single transition using `useBatchQueryParams`.
-- **Zero DOM Dependency in Parsers:** All parsers can run in both Node.js (Server Components, Route Handlers, Server Actions) and browser environments.
-- **Strict TypeScript Inference:** Generic parsers automatically infer whether the returned state is nullable or non-nullable.
-- **React 18 & 19 Native:** Uses `useTransition()` to mark URL navigation as a non-blocking transition and expose `isPending` for loading indicators.
-- **Zero External Runtime Overhead:** Only peer-depends on `react` and `next`.
+- **Safe URI Decoding & Arabic/Unicode Support:** Handles Arabic characters, unicode, and malformed percent encodings (`URIError`) safely with internal try/catch guards.
+- **Strict TypeScript Inference:** Generic parsers automatically infer non-nullable types when chaining `.withDefault()`.
+- **Zero External Runtime Overhead:** Only peer-depends on `react` (with `next` being optional).
 
 ---
 
-## 2. Installation & Requirements
+## 2. Installation & Entrypoints
 
 ```bash
 npm install paramsync
@@ -99,10 +92,21 @@ yarn add paramsync
 
 ### Peer Dependencies
 - `react`: `>=18.0.0`
-- `next`: `>=13.0.0` (App Router)
+- `next`: `>=13.0.0` (*Optional* — only needed when importing from `paramsync/next`)
 
-### Module Compatibility
-`paramsync` ships with dual ESM and CJS builds, along with full TypeScript type declarations (`.d.ts` and `.d.cts`) and sourcemaps.
+### Dedicated Entrypoints
+
+#### Router-Agnostic Setup (Vite, React Router, Remix, TanStack, Astro)
+The default root entrypoint has zero dependencies on `next`:
+```tsx
+import { useQueryState, useBatchQueryParams, parseAsString } from 'paramsync';
+```
+
+#### Next.js App Router Setup
+For Next.js App Router with Server Component transitions:
+```tsx
+import { useQueryState, useBatchQueryParams, parseAsString } from 'paramsync/next';
+```
 
 ---
 
@@ -113,6 +117,9 @@ yarn add paramsync
 | Parser | Parse Signature | Serialize Signature | Default Value Support | Clean URL Behavior |
 | :--- | :--- | :--- | :--- | :--- |
 | `parseAsString` | `string \| null` | `string` | `.withDefault(string)` | Removed if `""` or default |
+| `parseAsStringLiteral(allowed)` | `T \| null` | `string` | `.withDefault(T)` | Removed if invalid or default |
+| `parseAsIsoDate` | `Date \| null` | `string` (`YYYY-MM-DD`) | `.withDefault(Date)` | Removed if matches default |
+| `parseAsJson<T>(validator?)` | `T \| null` | `string` (JSON) | `.withDefault(T)` | Removed if matches default |
 | `parseAsInteger` | `number \| null` | `string` | `.withDefault(number)` | Removed if default |
 | `parseAsFloat` | `number \| null` | `string` | `.withDefault(number)` | Removed if default |
 | `parseAsBoolean` | `boolean \| null` | `string` | `.withDefault(boolean)` | Removed if default |
@@ -121,12 +128,13 @@ yarn add paramsync
 | `parseAsSort(field, order?, sep?)` | `SortOption<TField>` | `string` | Built-in `{ field, order }` | Removed if matches default |
 | `createParser(config)` | `T` | `string` | `.withDefault(T)` | Removed if matches default |
 
-### Hooks
+### Hooks & Utilities
 
-| Hook | Signature | Primary Purpose |
+| Hook / Utility | Signature | Primary Purpose |
 | :--- | :--- | :--- |
 | `useQueryState(key, parser, options?)` | `[value, setValue, reset, isPending]` | Reactive single-parameter state management with instant typing. |
-| `useBatchQueryParams(options?)` | `{ setBatchParams, resetAllParams, isPending }` | Multi-parameter batch updates in a single URL transition (Drawer/Modal). |
+| `useBatchQueryParams(options?)` | `{ setBatchParams, resetAllParams, isPending }` | Multi-parameter batch updates & instant UI reset across hooks. |
+| `batchUpdates(fn)` | `(fn: () => void) => void` | Coalesces multiple `useQueryState` updates into a single navigation. |
 
 ---
 
@@ -273,6 +281,82 @@ const [category, setCategory] = useQueryState('cat', parseAsString);
 
 // Returns: string (always defined)
 const [search, setSearch] = useQueryState('q', parseAsString.withDefault(''));
+```
+
+---
+
+### `parseAsStringLiteral`
+
+Type-safe parser for string literal unions (enums, statuses, tabs). Guarantees complete TypeScript inference without manual type casting (`as ...`). Automatically falls back to the default value if an unrecognized or invalid value is placed in the URL.
+
+- **Signature:** `parseAsStringLiteral<T extends string>(allowedValues: readonly T[] | T[]): Parser<T | null>`
+- **Parsing Behavior:** Returns the value as `T` if it matches one of `allowedValues`. Returns `null` (or fallback default) if missing or invalid.
+- **Clean URL Policy:** Deletes the key if the value matches `defaultValue` or is invalid.
+
+```tsx
+import { useQueryState, parseAsStringLiteral } from 'paramsync';
+
+type Status = 'all' | 'pending' | 'accepted' | 'rejected';
+
+// Fully typed as 'all' | 'pending' | 'accepted' | 'rejected' without casting!
+const [status, setStatus] = useQueryState(
+  'status',
+  parseAsStringLiteral(['all', 'pending', 'accepted', 'rejected'] as const).withDefault('all')
+);
+
+// If URL has ?status=hacked, status automatically reverts to 'all'!
+```
+
+---
+
+### `parseAsIsoDate`
+
+Converts calendar dates between JavaScript `Date` objects and `YYYY-MM-DD` query parameter strings. Features strict validation of calendar boundaries, valid months (1-12), days (1-31), and leap years.
+
+- **Signature:** `parseAsIsoDate: Parser<Date | null>`
+- **Parsing Behavior:** Parses `YYYY-MM-DD` string into a `Date` object. Returns `null` on invalid strings or non-existent dates (like Feb 31).
+- **Serialization Behavior:** Formats the `Date` as `YYYY-MM-DD`.
+- **Clean URL Policy:** Omits parameter if date matches `defaultValue` (uses millisecond comparison).
+
+```tsx
+import { useQueryState, parseAsIsoDate } from 'paramsync';
+
+// URL: ?date_from=2026-10-27
+const [startDate, setStartDate] = useQueryState(
+  'date_from',
+  parseAsIsoDate.withDefault(new Date(2026, 0, 1))
+);
+
+// Updates URL to ?date_from=2026-11-15
+setStartDate(new Date(2026, 10, 15));
+```
+
+---
+
+### `parseAsJson`
+
+Safely serializes and deserializes structured objects or complex filter configurations using `JSON.stringify` and `JSON.parse`. Features built-in try/catch guards against syntax errors and malformed URIs.
+
+- **Signature:** `parseAsJson<T>(validator?: (data: unknown) => boolean): Parser<T | null>`
+- **Parsing Behavior:** Parses JSON string into typed object `T`. Returns `null` or fallback on syntax error or failed validation.
+- **Serialization Behavior:** Converts object to JSON string.
+- **Clean URL Policy:** Deletes parameter when matching `defaultValue` (uses deep equality).
+
+```tsx
+import { useQueryState, parseAsJson } from 'paramsync';
+
+interface FilterConfig {
+  role: string;
+  minRating: number;
+}
+
+const [filters, setFilters] = useQueryState(
+  'f',
+  parseAsJson<FilterConfig>().withDefault({ role: 'all', minRating: 0 })
+);
+
+// URL: ?f=%7B%22role%22%3A%22admin%22%2C%22minRating%22%3A4%7D
+setFilters({ role: 'admin', minRating: 4 });
 ```
 
 ---
@@ -596,15 +680,38 @@ setBatchParams({
 });
 ```
 
-#### `resetAllParams`
+#### `resetAllParams` (Instant UI State Reset)
 
-Clears all query parameters from the URL while preserving critical keys:
+Clears all query parameters from the URL while preserving critical keys (like tabs or analytics tracking):
 
 ```tsx
 const { resetAllParams } = useBatchQueryParams();
 
 // Clears all filters but preserves analytics and tab indicators
 resetAllParams(['utm_source', 'utm_medium', 'tab']);
+```
+
+> **Zero-Latency Cross-Hook Synchronization:**  
+> When `resetAllParams()` is called, `paramsync` immediately notifies all active `useQueryState` instances on the page. Any active hooks not in `preserveKeys` cancel their pending debounce timers and reset their internal state to default **instantaneously (`0ms` UI latency)** without waiting for the router navigation transition to finish.
+
+---
+
+### `batchUpdates` Utility
+
+If you need to update multiple independent `useQueryState` hooks within an event handler, wrap them with `batchUpdates` to coalesce them into a single browser navigation:
+
+```tsx
+import { batchUpdates } from 'paramsync';
+
+function handleQuickPreset() {
+  batchUpdates(() => {
+    setSearch('');
+    setCategory('all');
+    setPage(1);
+    setSort({ field: 'rating', order: 'desc' });
+  });
+  // Exactly 1 URL transition is executed instead of 4!
+}
 ```
 
 ---

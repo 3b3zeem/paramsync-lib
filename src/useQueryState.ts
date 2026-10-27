@@ -1,66 +1,34 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { Parser, ParserWithDefault, isCleanValue } from './parsers';
 import {
-  Parser,
-  ParserWithDefault,
-  isCleanValue,
-} from './parsers';
-
-export interface UseQueryStateOptions<T> {
-  /**
-   * Fallback value used when query parameter is omitted or cannot be parsed.
-   */
-  defaultValue?: T;
-
-  /**
-   * Debounce delay in milliseconds before updating the browser URL.
-   * Internal state updates immediately to eliminate UI typing lag.
-   */
-  debounceMs?: number;
-
-  /**
-   * Navigation method: 'replace' updates URL in-place; 'push' creates a new browser history entry.
-   * @default 'replace'
-   */
-  history?: 'replace' | 'push';
-
-  /**
-   * Whether Next.js should scroll to the top of the page after URL update.
-   * @default false
-   */
-  scroll?: boolean;
-}
-
-export type StateUpdater<T> = T | ((prev: T) => T);
+  UseQueryStateOptions,
+  StateUpdater,
+  RouterAdapter,
+} from './types';
+import { vanillaAdapter } from './adapters/vanilla';
+import {
+  getCommittedSearchParams,
+  commitUrlParam,
+  registerHook,
+} from './urlManager';
 
 /**
- * Hook to manage React state synchronized bidirectionally with URL search parameters in Next.js App Router.
+ * Router-agnostic React hook to manage state synchronized bidirectionally with URL search parameters.
+ * Works out of the box with Vite, React Router, Remix, TanStack Router, Astro, and plain React.
  *
  * Features:
  * - **0ms UI Latency**: Local state updates instantaneously while URL navigation transitions asynchronously.
+ * - **Microtask Batching**: Coalesces concurrent state updates within the same tick into a single navigation.
+ * - **Race Condition Protection**: Never overwrites concurrently updated query parameters.
  * - **Debouncing**: Optional debounce delay to prevent flooding browser history during fast typing.
  * - **Clean URL Policy**: Strips default and empty values automatically to keep URLs pristine.
- * - **Non-blocking Transitions**: Integrates with Next.js `useTransition` to keep the UI interactive.
+ * - **Multi-Reset Instant Sync**: Automatically clears local state when `useBatchQueryParams().resetAllParams()` is called.
  *
  * @param key The query string parameter name (e.g. `'q'`, `'page'`, `'sort'`).
  * @param parser The parser instance (e.g. `parseAsString`, `parseAsInteger`, etc.).
- * @param options Optional configuration for default values, debouncing, and browser navigation history.
- * @returns A tuple of `[value, setValue, reset, isPending] as const`:
- * - `value`: Current state value parsed from the URL or fallback default.
- * - `setValue`: State updater function accepting either a raw value or a functional update `(prev => next)`.
- * - `reset`: Function to restore state to its default value and remove the parameter from the URL.
- * - `isPending`: Boolean flag indicating if Next.js is actively processing the URL transition.
- *
- * @example
- * ```tsx
- * const [query, setQuery, resetQuery, isPending] = useQueryState(
- *   'q',
- *   parseAsString.withDefault(''),
- *   { debounceMs: 300 }
- * );
- * ```
+ * @param options Optional configuration for default values, debouncing, navigation history, and custom router adapter.
  */
 export function useQueryState<T>(
   key: string,
@@ -105,9 +73,7 @@ export function useQueryState<T>(
   reset: () => void,
   isPending: boolean
 ] {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const adapter: RouterAdapter = options?.adapter ?? vanillaAdapter;
   const [isPending, startTransition] = useTransition();
 
   const effectiveDefault = options?.defaultValue ?? parser.defaultValue;
@@ -115,7 +81,8 @@ export function useQueryState<T>(
   const historyMode = options?.history ?? 'replace';
   const shouldScroll = options?.scroll ?? false;
 
-  const rawQueryValue = searchParams ? searchParams.get(key) : null;
+  const currentParams = getCommittedSearchParams(adapter);
+  const rawQueryValue = currentParams.get(key);
   const parsedUrlValue = parser.parse(rawQueryValue);
   const initialValue =
     parsedUrlValue !== null && parsedUrlValue !== undefined
@@ -132,31 +99,72 @@ export function useQueryState<T>(
   const lastKnownUrlParamRef = useRef<string | null>(rawQueryValue);
   const lastCommittedParamRef = useRef<string | null>(rawQueryValue);
 
-  // Synchronize internal state when URL search params change externally (e.g. browser back/forward navigation)
+  // Register with coordinator for multi-hook sync, batch reset, and cancellation of pending timers
   useEffect(() => {
-    const currentParam = searchParams ? searchParams.get(key) : null;
-
-    if (currentParam !== lastKnownUrlParamRef.current) {
-      lastKnownUrlParamRef.current = currentParam;
-
-      if (currentParam !== lastCommittedParamRef.current) {
-        lastCommittedParamRef.current = currentParam;
-        const parsed = parser.parse(currentParam);
-        const nextVal =
-          parsed !== null && parsed !== undefined
-            ? parsed
-            : (effectiveDefault as T);
-
+    return registerHook({
+      key,
+      reset: () => {
         if (timerRef.current) {
           clearTimeout(timerRef.current);
           timerRef.current = null;
         }
+        const def = effectiveDefault as T;
+        setInternalValue(def);
+        latestValueRef.current = def;
+        lastCommittedParamRef.current = null;
+        lastKnownUrlParamRef.current = null;
+      },
+      setValueDirect: (val: any) => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        setInternalValue(val);
+        latestValueRef.current = val;
+      },
+      cancelTimer: () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      },
+      getEffectiveDefault: () => effectiveDefault,
+    });
+  }, [key, effectiveDefault]);
 
-        setInternalValue(nextVal);
-        latestValueRef.current = nextVal;
+  // Synchronize internal state when URL search params change externally (e.g. browser back/forward navigation)
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const liveParams = getCommittedSearchParams(adapter);
+      const currentParam = liveParams.get(key);
+
+      if (currentParam !== lastKnownUrlParamRef.current) {
+        lastKnownUrlParamRef.current = currentParam;
+
+        if (currentParam !== lastCommittedParamRef.current) {
+          lastCommittedParamRef.current = currentParam;
+          const parsed = parser.parse(currentParam);
+          const nextVal =
+            parsed !== null && parsed !== undefined
+              ? parsed
+              : (effectiveDefault as T);
+
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+          }
+
+          setInternalValue(nextVal);
+          latestValueRef.current = nextVal;
+        }
       }
+    };
+
+    if (adapter.subscribe) {
+      return adapter.subscribe(handleUrlChange);
     }
-  }, [searchParams, key, parser, effectiveDefault]);
+    return undefined;
+  }, [adapter, key, parser, effectiveDefault]);
 
   useEffect(() => {
     return () => {
@@ -168,40 +176,26 @@ export function useQueryState<T>(
 
   const commitToUrl = useCallback(
     (targetValue: T) => {
-      const currentParams = new URLSearchParams(
-        searchParams ? searchParams.toString() : ''
-      );
-      const serialized = parser.serialize(targetValue);
-
-      // Clean URL Policy: omit parameter if value is empty or matches default
-      if (isCleanValue(targetValue, effectiveDefault) || serialized === '') {
-        currentParams.delete(key);
-      } else {
-        currentParams.set(key, serialized);
+      let serialized: string | null = null;
+      if (!isCleanValue(targetValue, effectiveDefault)) {
+        const s = parser.serialize(targetValue);
+        if (s !== '') {
+          serialized = s;
+        }
       }
 
-      const queryString = currentParams.toString();
-      const nextUrl = queryString ? `${pathname}?${queryString}` : pathname;
-      lastCommittedParamRef.current = currentParams.get(key);
+      lastCommittedParamRef.current = serialized;
 
       startTransition(() => {
-        if (historyMode === 'push') {
-          router.push(nextUrl, { scroll: shouldScroll });
-        } else {
-          router.replace(nextUrl, { scroll: shouldScroll });
-        }
+        commitUrlParam(
+          key,
+          serialized,
+          { history: historyMode, scroll: shouldScroll },
+          adapter
+        );
       });
     },
-    [
-      searchParams,
-      parser,
-      effectiveDefault,
-      key,
-      pathname,
-      historyMode,
-      shouldScroll,
-      router,
-    ]
+    [key, parser, effectiveDefault, historyMode, shouldScroll, adapter, startTransition]
   );
 
   const setValue = useCallback(

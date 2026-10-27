@@ -31,13 +31,37 @@ export interface ParserWithDefault<T> extends Parser<T> {
 }
 
 /**
+ * Safely decodes a URI component with try/catch to avoid `URIError: URI malformed`
+ * when malformed percent sequences or special characters are present in the URL.
+ */
+export function safeDecode(value: string | null): string | null {
+  if (value === null) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Safely encodes a string for query parameters.
+ */
+export function safeEncode(value: string): string {
+  try {
+    return encodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
  * Factory to create custom parsers with seamless chaining and default value fallback.
  *
  * @example
  * ```ts
- * const parseAsDate = createParser({
- *   parse: (val) => (val ? new Date(val) : null),
- *   serialize: (date) => (date ? date.toISOString().slice(0, 10) : ''),
+ * const parseAsCustom = createParser({
+ *   parse: (val) => (val ? Number(val) * 2 : null),
+ *   serialize: (num) => (num !== null ? String(num / 2) : ''),
  * });
  * ```
  */
@@ -87,6 +111,7 @@ export function createParser<T>(options: {
 /**
  * Parser for string parameters.
  * Parses raw string or returns `null` when missing.
+ * Handles Arabic characters, Unicode, and spaces with safe decoding against malformed URI errors.
  *
  * @example
  * ```ts
@@ -94,7 +119,7 @@ export function createParser<T>(options: {
  * ```
  */
 export const parseAsString: Parser<string | null> = createParser<string | null>({
-  parse: (value) => value,
+  parse: (value) => (value !== null ? safeDecode(value) : null),
   serialize: (value) => (value !== null && value !== undefined ? String(value) : ''),
 });
 
@@ -110,7 +135,8 @@ export const parseAsString: Parser<string | null> = createParser<string | null>(
 export const parseAsInteger: Parser<number | null> = createParser<number | null>({
   parse: (value) => {
     if (value === null || value === '') return null;
-    const num = Number(value);
+    const decoded = safeDecode(value) ?? value;
+    const num = Number(decoded.trim());
     return Number.isInteger(num) ? num : null;
   },
   serialize: (value) => (value !== null && value !== undefined ? Math.round(value).toString() : ''),
@@ -123,7 +149,8 @@ export const parseAsInteger: Parser<number | null> = createParser<number | null>
 export const parseAsFloat: Parser<number | null> = createParser<number | null>({
   parse: (value) => {
     if (value === null || value === '') return null;
-    const num = Number(value);
+    const decoded = safeDecode(value) ?? value;
+    const num = Number(decoded.trim());
     return Number.isFinite(num) ? num : null;
   },
   serialize: (value) => (value !== null && value !== undefined ? String(value) : ''),
@@ -141,7 +168,8 @@ export const parseAsFloat: Parser<number | null> = createParser<number | null>({
 export const parseAsBoolean: Parser<boolean | null> = createParser<boolean | null>({
   parse: (value) => {
     if (value === null || value === '') return null;
-    const normalized = value.trim().toLowerCase();
+    const decoded = safeDecode(value) ?? value;
+    const normalized = decoded.trim().toLowerCase();
     if (normalized === 'true' || normalized === '1') return true;
     if (normalized === 'false' || normalized === '0') return false;
     return null;
@@ -149,11 +177,146 @@ export const parseAsBoolean: Parser<boolean | null> = createParser<boolean | nul
   serialize: (value) => (value === true ? 'true' : value === false ? 'false' : ''),
 });
 
-// --- Complex Parsers ---
+// --- Advanced Parsers ---
+
+/**
+ * Parser for string literal unions (enums, statuses, tabs).
+ * Ensures full TypeScript type safety without manual type casting.
+ * Automatically falls back to default if an unrecognized value is present in the URL.
+ *
+ * @param allowedValues Array or tuple of permitted string literal values
+ *
+ * @example
+ * ```ts
+ * type Status = 'all' | 'pending' | 'accepted' | 'rejected';
+ *
+ * const [status, setStatus] = useQueryState(
+ *   'status',
+ *   parseAsStringLiteral(['all', 'pending', 'accepted', 'rejected'] as const).withDefault('all')
+ * );
+ * ```
+ */
+export function parseAsStringLiteral<T extends string>(
+  allowedValues: readonly T[] | T[]
+): Parser<T | null> {
+  const allowedSet = new Set<string>(allowedValues);
+
+  return createParser<T | null>({
+    parse: (value: string | null): T | null => {
+      if (value === null || value === undefined) return null;
+      const decoded = safeDecode(value);
+      if (decoded !== null && allowedSet.has(decoded)) {
+        return decoded as T;
+      }
+      return null;
+    },
+    serialize: (value: T | null): string => {
+      if (value !== null && value !== undefined && allowedSet.has(value)) {
+        return String(value);
+      }
+      return '';
+    },
+  });
+}
+
+/**
+ * Parser for ISO format calendar dates (`YYYY-MM-DD`).
+ * Validates actual calendar boundaries (leap years, months, days) and prevents invalid dates.
+ *
+ * @example
+ * ```ts
+ * const [dateFrom, setDateFrom] = useQueryState(
+ *   'date_from',
+ *   parseAsIsoDate.withDefault(new Date(2026, 0, 1))
+ * );
+ * ```
+ */
+export const parseAsIsoDate: Parser<Date | null> = createParser<Date | null>({
+  parse: (value: string | null): Date | null => {
+    if (!value || value.trim() === '') return null;
+    const decoded = safeDecode(value.trim()) ?? value.trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(decoded);
+    if (!match) return null;
+
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const day = parseInt(match[3], 10);
+
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+    const date = new Date(year, month - 1, day);
+    if (
+      isNaN(date.getTime()) ||
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
+      return null;
+    }
+    return date;
+  },
+  serialize: (date: Date | null): string => {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  },
+});
+
+/**
+ * Parser for complex JSON objects and nested filter criteria.
+ * Safely parses and serializes via JSON with protection against syntax errors and malformed URIs.
+ *
+ * @param validator Optional runtime validation function to ensure the parsed shape is valid
+ *
+ * @example
+ * ```ts
+ * interface FilterCriteria {
+ *   role: string;
+ *   minRating: number;
+ * }
+ *
+ * const [filters, setFilters] = useQueryState(
+ *   'f',
+ *   parseAsJson<FilterCriteria>().withDefault({ role: 'all', minRating: 0 })
+ * );
+ * ```
+ */
+export function parseAsJson<T>(
+  validator?: (data: unknown) => boolean
+): Parser<T | null> {
+  return createParser<T | null>({
+    parse: (value: string | null): T | null => {
+      if (value === null || value === undefined || value.trim() === '') {
+        return null;
+      }
+      try {
+        const decoded = safeDecode(value.trim()) ?? value.trim();
+        const parsed = JSON.parse(decoded);
+        if (validator && !validator(parsed)) {
+          return null;
+        }
+        return parsed as T;
+      } catch {
+        return null;
+      }
+    },
+    serialize: (value: T | null): string => {
+      if (value === null || value === undefined) return '';
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return '';
+      }
+    },
+  });
+}
 
 /**
  * Parser for arrays of values (e.g. `?tags=shoes,watches`).
  * Perfect for multi-select checkboxes, tags, and category chips.
+ * Safely handles Arabic words, special characters, and URL-encoded items.
  *
  * @param itemParser Parser instance for individual items
  * @param separator Custom delimiter (defaults to comma `,`)
@@ -178,7 +341,8 @@ export function parseAsArray<T>(
       const results: ItemType[] = [];
 
       for (const raw of rawItems) {
-        const parsed = itemParser.parse(raw);
+        const decoded = safeDecode(raw) ?? raw;
+        const parsed = itemParser.parse(decoded);
         if (parsed !== null && parsed !== undefined) {
           results.push(parsed as ItemType);
         }
@@ -226,7 +390,8 @@ export function parseAsNumberRange(
         return defaultRange;
       }
 
-      const parts = value.split(separator);
+      const decoded = safeDecode(value.trim()) ?? value.trim();
+      const parts = decoded.split(separator);
       if (parts.length !== 2) {
         return defaultRange;
       }
@@ -290,7 +455,8 @@ export function parseAsSort<TField extends string = string>(
         return defaultOption;
       }
 
-      const [field, rawOrder] = value.split(separator);
+      const decoded = safeDecode(value.trim()) ?? value.trim();
+      const [field, rawOrder] = decoded.split(separator);
       if (!field) {
         return defaultOption;
       }
@@ -319,11 +485,16 @@ export function parseAsSort<TField extends string = string>(
 
 /**
  * Deep equality comparator for state values against defaults.
+ * Supports primitives, Date objects, arrays, and plain objects.
  */
 export function areValuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null || a === undefined || b === undefined) return false;
   if (typeof a !== typeof b) return false;
+
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() === b.getTime();
+  }
 
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;

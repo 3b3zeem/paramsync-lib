@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useQueryState } from '../src/useQueryState';
+import { useQueryState } from '../src/next';
 import {
   parseAsString,
   parseAsInteger,
@@ -23,8 +23,11 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
 }));
 
+import { resetUrlManagerForTesting } from '../src/urlManager';
+
 describe('src/useQueryState.ts', () => {
   beforeEach(() => {
+    resetUrlManagerForTesting();
     vi.useFakeTimers();
     mockPush.mockClear();
     mockReplace.mockClear();

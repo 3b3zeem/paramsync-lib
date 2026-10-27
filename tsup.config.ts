@@ -1,7 +1,10 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: {
+    index: 'src/index.ts',
+    'next/index': 'src/next/index.ts',
+  },
   format: ['cjs', 'esm'],
   dts: true,
   sourcemap: true,
@@ -9,5 +12,8 @@ export default defineConfig({
   splitting: false,
   treeshake: true,
   minify: false,
+  banner: {
+    js: "'use client';",
+  },
   external: ['react', 'react-dom', 'next', 'next/navigation'],
 });

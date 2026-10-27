@@ -4,6 +4,9 @@ import {
   parseAsInteger,
   parseAsFloat,
   parseAsBoolean,
+  parseAsStringLiteral,
+  parseAsIsoDate,
+  parseAsJson,
   parseAsArray,
   parseAsNumberRange,
   parseAsSort,
@@ -30,6 +33,18 @@ describe('src/parsers.ts', () => {
     it('serializes strings cleanly', () => {
       expect(parseAsString.serialize('hello')).toBe('hello');
       expect(parseAsString.serialize(null)).toBe('');
+    });
+
+    it('handles Arabic characters and special URL encoded sequences safely', () => {
+      expect(parseAsString.parse('أحمد')).toBe('أحمد');
+      expect(parseAsString.parse('%D8%A3%D8%AD%D9%85%D8%AF')).toBe('أحمد');
+      expect(parseAsString.parse('رحلات%20دينامو')).toBe('رحلات دينامو');
+    });
+
+    it('never throws URIError on broken percent sequences', () => {
+      expect(() => parseAsString.parse('50% discount')).not.toThrow();
+      expect(parseAsString.parse('50% discount')).toBe('50% discount');
+      expect(() => parseAsString.parse('%E0%A4%9')).not.toThrow();
     });
   });
 
@@ -108,6 +123,108 @@ describe('src/parsers.ts', () => {
     });
   });
 
+  describe('parseAsStringLiteral', () => {
+    const statuses = ['all', 'pending', 'accepted', 'rejected'] as const;
+    const statusParser = parseAsStringLiteral(statuses).withDefault('all');
+
+    it('parses valid literal values with full type inference', () => {
+      expect(statusParser.parse('pending')).toBe('pending');
+      expect(statusParser.parse('accepted')).toBe('accepted');
+      expect(statusParser.parse('rejected')).toBe('rejected');
+    });
+
+    it('falls back to default value on invalid, empty, or missing parameter', () => {
+      expect(statusParser.parse('hacked')).toBe('all');
+      expect(statusParser.parse(null)).toBe('all');
+      expect(statusParser.parse('')).toBe('all');
+    });
+
+    it('handles encoded values properly', () => {
+      const roles = ['مدير', 'مشرف', 'مستخدم'] as const;
+      const roleParser = parseAsStringLiteral(roles).withDefault('مستخدم');
+      expect(roleParser.parse('%D9%85%D8%AF%D9%8A%D8%B1')).toBe('مدير');
+      expect(roleParser.parse('مشرف')).toBe('مشرف');
+      expect(roleParser.parse('غير_معروف')).toBe('مستخدم');
+    });
+
+    it('serializes allowed literal and omits invalid', () => {
+      expect(statusParser.serialize('accepted')).toBe('accepted');
+      expect(statusParser.serialize('unknown' as any)).toBe('');
+    });
+  });
+
+  describe('parseAsIsoDate', () => {
+    it('parses valid YYYY-MM-DD dates into Date objects', () => {
+      const parsed = parseAsIsoDate.parse('2026-10-27');
+      expect(parsed).toBeInstanceOf(Date);
+      expect(parsed?.getFullYear()).toBe(2026);
+      expect(parsed?.getMonth()).toBe(9); // 0-indexed (October = 9)
+      expect(parsed?.getDate()).toBe(27);
+    });
+
+    it('returns null on invalid date formats or impossible dates', () => {
+      expect(parseAsIsoDate.parse(null)).toBeNull();
+      expect(parseAsIsoDate.parse('')).toBeNull();
+      expect(parseAsIsoDate.parse('not-a-date')).toBeNull();
+      expect(parseAsIsoDate.parse('2026-13-01')).toBeNull(); // month > 12
+      expect(parseAsIsoDate.parse('2026-02-31')).toBeNull(); // Feb 31 does not exist
+      expect(parseAsIsoDate.parse('26-10-2026')).toBeNull();
+    });
+
+    it('supports withDefault', () => {
+      const defaultDate = new Date(2026, 0, 1);
+      const parser = parseAsIsoDate.withDefault(defaultDate);
+      expect(parser.parse(null)).toEqual(defaultDate);
+      expect(parser.parse('invalid')).toEqual(defaultDate);
+    });
+
+    it('serializes Date objects to YYYY-MM-DD', () => {
+      const date = new Date(2026, 9, 27);
+      expect(parseAsIsoDate.serialize(date)).toBe('2026-10-27');
+      expect(parseAsIsoDate.serialize(null)).toBe('');
+    });
+  });
+
+  describe('parseAsJson', () => {
+    interface FilterCriteria {
+      role: string;
+      level: number;
+    }
+
+    const jsonParser = parseAsJson<FilterCriteria>().withDefault({
+      role: 'guest',
+      level: 0,
+    });
+
+    it('parses valid JSON strings and handles URL encoding', () => {
+      const input = JSON.stringify({ role: 'admin', level: 2 });
+      expect(jsonParser.parse(input)).toEqual({ role: 'admin', level: 2 });
+
+      const encoded = encodeURIComponent(JSON.stringify({ role: 'editor', level: 1 }));
+      expect(jsonParser.parse(encoded)).toEqual({ role: 'editor', level: 1 });
+    });
+
+    it('safely catches invalid JSON or malformed URIs and falls back to default', () => {
+      expect(jsonParser.parse('not json')).toEqual({ role: 'guest', level: 0 });
+      expect(jsonParser.parse('{bad_json: 123')).toEqual({ role: 'guest', level: 0 });
+      expect(jsonParser.parse('%E0%A4%9')).toEqual({ role: 'guest', level: 0 });
+    });
+
+    it('supports custom validator functions', () => {
+      const validatedParser = parseAsJson<{ age: number }>((data): data is { age: number } => {
+        return typeof data === 'object' && data !== null && 'age' in data && typeof (data as any).age === 'number';
+      });
+
+      expect(validatedParser.parse('{"age":25}')).toEqual({ age: 25 });
+      expect(validatedParser.parse('{"name":"john"}')).toBeNull();
+    });
+
+    it('serializes objects to JSON strings', () => {
+      expect(jsonParser.serialize({ role: 'admin', level: 5 })).toBe('{"role":"admin","level":5}');
+      expect(jsonParser.serialize(null as any)).toBe('');
+    });
+  });
+
   describe('parseAsArray', () => {
     it('parses comma-separated values into an array', () => {
       const tagsParser = parseAsArray(parseAsString);
@@ -116,6 +233,20 @@ describe('src/parsers.ts', () => {
         'gadgets',
         'phones',
       ]);
+    });
+
+    it('supports Arabic and URL encoded array items', () => {
+      const tagsParser = parseAsArray(parseAsString);
+      expect(tagsParser.parse('أحمد,%D9%85%D8%AD%D9%85%D8%AF,علي')).toEqual([
+        'أحمد',
+        'محمد',
+        'علي',
+      ]);
+    });
+
+    it('does not crash on malformed URI sequences inside array', () => {
+      const tagsParser = parseAsArray(parseAsString);
+      expect(tagsParser.parse('50%off,sale')).toEqual(['50%off', 'sale']);
     });
 
     it('returns empty array on null or empty string', () => {
@@ -200,16 +331,23 @@ describe('src/parsers.ts', () => {
   });
 
   describe('areValuesEqual and isCleanValue', () => {
-    it('compares primitives, arrays, and objects accurately', () => {
+    it('compares primitives, dates, arrays, and objects accurately', () => {
       expect(areValuesEqual('test', 'test')).toBe(true);
       expect(areValuesEqual('a', 'b')).toBe(false);
       expect(areValuesEqual([1, 2, 3], [1, 2, 3])).toBe(true);
       expect(areValuesEqual([1, 2], [1, 2, 3])).toBe(false);
       expect(areValuesEqual({ min: 10, max: 50 }, { min: 10, max: 50 })).toBe(true);
       expect(areValuesEqual({ min: 10, max: 50 }, { min: 10, max: 60 })).toBe(false);
+
+      // Date objects
+      const d1 = new Date(2026, 9, 27);
+      const d2 = new Date(2026, 9, 27);
+      const d3 = new Date(2026, 9, 28);
+      expect(areValuesEqual(d1, d2)).toBe(true);
+      expect(areValuesEqual(d1, d3)).toBe(false);
     });
 
-    it('determines clean values correctly for Clean URL policy', () => {
+    it('determines clean values correctly for Clean URL policy including Dates', () => {
       expect(isCleanValue(null)).toBe(true);
       expect(isCleanValue(undefined)).toBe(true);
       expect(isCleanValue('')).toBe(true);
@@ -221,27 +359,24 @@ describe('src/parsers.ts', () => {
       expect(isCleanValue(2, 1)).toBe(false);
       expect(isCleanValue({ min: 0, max: 100 }, { min: 0, max: 100 })).toBe(true);
       expect(isCleanValue({ min: 5, max: 100 }, { min: 0, max: 100 })).toBe(false);
+
+      const d1 = new Date(2026, 9, 27);
+      const d2 = new Date(2026, 9, 27);
+      expect(isCleanValue(d1, d2)).toBe(true);
     });
   });
 
   describe('createParser custom extension', () => {
     it('allows creating custom parsers easily', () => {
-      const jsonParser = createParser<{ id: number }>({
-        parse: (val) => {
-          if (!val) return null as unknown as { id: number };
-          try {
-            return JSON.parse(val);
-          } catch {
-            return null as unknown as { id: number };
-          }
-        },
-        serialize: (val) => JSON.stringify(val),
-        defaultValue: { id: 0 },
+      const multiplierParser = createParser<number>({
+        parse: (val) => (val ? Number(val) * 2 : 0),
+        serialize: (val) => String(val),
+        defaultValue: 0,
       });
 
-      expect(jsonParser.parse('{"id":99}')).toEqual({ id: 99 });
-      expect(jsonParser.parse(null)).toEqual({ id: 0 });
-      expect(jsonParser.serialize({ id: 99 })).toBe('{"id":99}');
+      expect(multiplierParser.parse('5')).toBe(10);
+      expect(multiplierParser.parse(null)).toBe(0);
+      expect(multiplierParser.serialize(10)).toBe('10');
     });
   });
 });

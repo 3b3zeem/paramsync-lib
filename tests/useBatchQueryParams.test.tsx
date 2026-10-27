@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useBatchQueryParams } from '../src/useBatchQueryParams';
+import { useBatchQueryParams } from '../src/next';
 import {
   parseAsArray,
   parseAsString,
@@ -23,8 +23,11 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
 }));
 
+import { resetUrlManagerForTesting } from '../src/urlManager';
+
 describe('src/useBatchQueryParams.ts', () => {
   beforeEach(() => {
+    resetUrlManagerForTesting();
     mockPush.mockClear();
     mockReplace.mockClear();
     mockSearchParams = new URLSearchParams('');
